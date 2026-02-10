@@ -1,0 +1,51 @@
+{
+  "name": "r2-file-manager",
+  "version": "1.0.0",
+  "private": false,
+  "description": "Simple web app to manage files in Cloudflare R2 (list, upload, view, delete multiple)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js",
+    "test": "echo \"No tests\" && exit 0"
+  },
+  "keywords": [
+    "cloudflare",
+    "r2",
+    "s3",
+    "file-manager",
+    "express",
+    "node"
+  ],
+  "author": "",
+  "license": "MIT",
+  "files": [
+    "server.js",
+    "public/",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mhasanloo/r2-file-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mhasanloo/r2-file-manager/issues"
+  },
+  "homepage": "https://github.com/mhasanloo/r2-file-manager#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.370.0",
+    "@aws-sdk/s3-request-presigner": "^3.370.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1"
+  }
+}
+
+
