@@ -1,0 +1,164 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>R2 File Manager</title>
+    <style>
+      body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; padding: 20px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+      .card { border: 1px solid #ddd; border-radius: 8px; padding: 8px; display:flex; flex-direction:column; gap:8px; }
+      .thumb { width:100%; height:120px; object-fit:cover; background:#f5f5f5; border-radius:6px; }
+      .controls { display:flex; gap:8px; margin-bottom:12px; }
+      .selected { outline: 3px solid #2b6cb0; }
+      .toolbar { display:flex; gap:8px; margin-bottom:16px; }
+      /* label styling to handle long keys gracefully */
+      .label { display: block; font-size: 12px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      /* allow label to wrap when desired (alternative), uncomment if you prefer wrap */
+      /* .label { white-space: normal; word-break: break-all; } */
+    </style>
+  </head>
+  <body>
+    <h1>R2 File Manager</h1>
+
+    <div class="toolbar">
+      <input id="fileInput" type="file" />
+      <button id="uploadBtn">Upload</button>
+      <button id="refreshBtn">Refresh</button>
+      <button id="deleteSelectedBtn">Delete Selected</button>
+      <label for="pageSizeSelect" style="display:flex; align-items:center; gap:6px; margin-left:8px;">Page size:
+        <select id="pageSizeSelect">
+          <option value="12">12</option>
+          <option value="24" selected>24</option>
+          <option value="48">48</option>
+          <option value="100">100</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="grid" class="grid"></div>
+    <div style="display:flex; gap:8px; margin-top:12px; align-items:center;">
+      <button id="prevBtn">Prev</button>
+      <button id="nextBtn">Next</button>
+      <div id="pageInfo" style="margin-left:8px;"></div>
+    </div>
+
+    <script>
+      const fileInput = document.getElementById('fileInput');
+      const uploadBtn = document.getElementById('uploadBtn');
+      const refreshBtn = document.getElementById('refreshBtn');
+      const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+      const grid = document.getElementById('grid');
+
+      let items = [];
+      let selected = new Set();
+      let pageSize = parseInt(document.getElementById('pageSizeSelect')?.value || '24', 10);
+      let continuationStack = []; // stack of tokens for prev
+      let currentToken = null;
+      let page = 1;
+
+      async function listItems(opts = {}) {
+        const qs = new URLSearchParams();
+        qs.set('pageSize', pageSize);
+        if (opts.token) qs.set('continuationToken', opts.token);
+        const r = await fetch('/list?' + qs.toString());
+        const data = await r.json();
+        items = data.items || [];
+        // manage tokens
+        if (opts.pushToken) { continuationStack.push(opts.pushToken); }
+        currentToken = data.nextContinuationToken || null;
+        renderGrid();
+        document.getElementById('pageInfo').textContent = `Page ${page}`;
+      }
+
+      function renderGrid() {
+        grid.innerHTML = '';
+        for (const it of items) {
+          const el = document.createElement('div');
+          el.className = 'card';
+          const img = document.createElement('img');
+          img.className = 'thumb';
+          img.alt = it.key;
+          img.src = '';
+          fetch(`/signed/${encodeURIComponent(it.key)}`).then(r=>r.json()).then(d=>{ if(d.url) img.src = d.url; });
+
+          const label = document.createElement('div');
+          label.textContent = it.key;
+          label.className = 'label';
+          el.appendChild(img);
+          el.appendChild(label);
+
+          // download control
+          const controlsDiv = document.createElement('div');
+          controlsDiv.className = 'controls';
+          const downloadLink = document.createElement('a');
+          downloadLink.textContent = 'Download';
+          downloadLink.href = `/download/${encodeURIComponent(it.key)}`;
+          // prefer native download hint; server also sets Content-Disposition
+          downloadLink.setAttribute('download', it.key);
+          downloadLink.addEventListener('click', (e) => { e.stopPropagation(); });
+          controlsDiv.appendChild(downloadLink);
+          el.appendChild(controlsDiv);
+
+          el.addEventListener('click', () => {
+            if (selected.has(it.key)) { selected.delete(it.key); el.classList.remove('selected'); }
+            else { selected.add(it.key); el.classList.add('selected'); }
+          });
+
+          grid.appendChild(el);
+        }
+      }
+
+      uploadBtn.addEventListener('click', async () => {
+        const file = fileInput.files[0];
+        if (!file) return alert('Choose a file first');
+        const fd = new FormData();
+        fd.append('file', file);
+        const r = await fetch('/upload', { method: 'POST', body: fd });
+        const data = await r.json();
+        if (data.ok) { listItems(); fileInput.value = ''; }
+        else alert('Upload failed');
+      });
+
+      refreshBtn.addEventListener('click', listItems);
+
+      deleteSelectedBtn.addEventListener('click', async () => {
+        if (selected.size === 0) return alert('No files selected');
+        if (!confirm('Delete selected files?')) return;
+        const keys = Array.from(selected);
+        const r = await fetch('/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys }) });
+        const d = await r.json();
+        if (d.ok) { selected.clear(); listItems(); }
+        else alert('Delete failed');
+      });
+
+      document.getElementById('nextBtn').addEventListener('click', async () => {
+        if (!currentToken) return alert('No more pages');
+        page += 1;
+        await listItems({ token: currentToken, pushToken: currentToken });
+      });
+
+      document.getElementById('prevBtn').addEventListener('click', async () => {
+        if (continuationStack.length <= 1) return alert('Already at first page');
+        // pop current
+        continuationStack.pop();
+        const token = continuationStack[continuationStack.length - 1] || null;
+        page = Math.max(1, page - 1);
+        await listItems({ token });
+      });
+
+      document.getElementById('pageSizeSelect').addEventListener('change', async (e) => {
+        pageSize = parseInt(e.target.value, 10);
+        // reset pagination
+        continuationStack = [];
+        currentToken = null;
+        page = 1;
+        await listItems();
+      });
+
+      listItems();
+    </script>
+  </body>
+</html>
+
+
